@@ -1,16 +1,3 @@
-"""
-data/weather_dataset.py
-=======================
-PyTorch Dataset + Lightning DataModule for the Temporal Weather GNN.
-
-Each sample is a tuple:
-  (graph_sequence, target_sequence)
-
-where:
-  graph_sequence : list of T_in  PyG Data objects  (one per input time step)
-  target_sequence: np.ndarray [T_out, N, V]         (future values to predict)
-"""
-
 from __future__ import annotations
 
 import os
@@ -26,15 +13,9 @@ from torch_geometric.data import Data
 try:
     import lightning as L
 except ImportError:
-    import pytorch_lightning as L   # type: ignore
-
-
-# ─────────────────────────────────────────────────────────────
-#  Normalization helper
-# ─────────────────────────────────────────────────────────────
+    import pytorch_lightning as L   
 
 class Normalizer:
-    """Per-variable z-score or min-max normalization fitted on training data."""
 
     def __init__(self, method: str = "z-score"):
         self.method = method
@@ -45,7 +26,7 @@ class Normalizer:
 
     def fit(self, features: np.ndarray) -> "Normalizer":
         """features: [T, N, V]"""
-        flat = features.reshape(-1, features.shape[-1])   # [T*N, V]
+        flat = features.reshape(-1, features.shape[-1]) 
         if self.method == "z-score":
             self.mean = flat.mean(axis=0)
             self.std  = flat.std(axis=0) + 1e-8
@@ -79,24 +60,8 @@ class Normalizer:
         return obj
 
 
-# ─────────────────────────────────────────────────────────────
-#  Core Dataset
-# ─────────────────────────────────────────────────────────────
 
 class WeatherGraphDataset(Dataset):
-    """
-    Sliding-window dataset over a spatio-temporal weather array.
-
-    Parameters
-    ----------
-    features     : np.ndarray [T, N, V]
-    coords       : np.ndarray [N, 2]   (lat, lon)
-    times        : pd.DatetimeIndex    length T
-    static_graph : dict with "edge_index" and "edge_attr" tensors
-    history_len  : int   number of input time steps
-    forecast_len : int   number of future steps to predict
-    normalizer   : Normalizer  (already fitted on training split)
-    """
 
     def __init__(
         self,
@@ -122,7 +87,6 @@ class WeatherGraphDataset(Dataset):
         if normalizer is not None:
             self.features = normalizer.transform(features).astype(np.float32)
 
-        # Valid window start indices
         total_len = history_len + forecast_len
         self.indices = list(range(len(features) - total_len + 1))
 
@@ -131,14 +95,13 @@ class WeatherGraphDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Tuple[List[Data], torch.Tensor]:
         start = self.indices[idx]
-        x_seq = self.features[start : start + self.history_len]           # [T_in, N, V]
+        x_seq = self.features[start : start + self.history_len]        
         y_seq = self.features[start + self.history_len :
-                              start + self.history_len + self.forecast_len]  # [T_out, N, V]
+                              start + self.history_len + self.forecast_len] 
 
-        # Build per-step PyG graph objects
         graphs = []
         for t in range(self.history_len):
-            node_feat = torch.tensor(x_seq[t], dtype=torch.float32)       # [N, V]
+            node_feat = torch.tensor(x_seq[t], dtype=torch.float32)   
             time_obj  = self.times[start + t]
             hour      = time_obj.hour
             doy       = time_obj.dayofyear
@@ -149,9 +112,9 @@ class WeatherGraphDataset(Dataset):
                 np.cos(2 * np.pi * hour / 24),
                 np.sin(2 * np.pi * doy  / 365),
                 np.cos(2 * np.pi * doy  / 365),
-            ], dtype=torch.float32).unsqueeze(0).expand(self.n_nodes, -1)  # [N, 4]
+            ], dtype=torch.float32).unsqueeze(0).expand(self.n_nodes, -1)
 
-            x = torch.cat([node_feat, t_enc], dim=-1)                     # [N, V+4]
+            x = torch.cat([node_feat, t_enc], dim=-1)                  
 
             g = Data(
                 x          = x,
@@ -163,31 +126,17 @@ class WeatherGraphDataset(Dataset):
             )
             graphs.append(g)
 
-        target = torch.tensor(y_seq, dtype=torch.float32)                 # [T_out, N, V]
+        target = torch.tensor(y_seq, dtype=torch.float32)             
         return graphs, target
 
 
 def collate_fn(batch):
-    """
-    Custom collate for list-of-graphs inputs.
-    Returns:
-      graph_seqs : list[list[Data]]  (batch of graph sequences)
-      targets    : Tensor [B, T_out, N, V]
-    """
     graph_seqs = [item[0] for item in batch]
     targets    = torch.stack([item[1] for item in batch], dim=0)
     return graph_seqs, targets
-
-
-# ─────────────────────────────────────────────────────────────
-#  Lightning DataModule
-# ─────────────────────────────────────────────────────────────
+  
 
 class WeatherDataModule(L.LightningDataModule):
-    """
-    Loads processed numpy arrays, builds static graph once,
-    fits normalizer on training split, and yields DataLoaders.
-    """
 
     def __init__(self, cfg: dict):
         super().__init__()
@@ -210,8 +159,8 @@ class WeatherDataModule(L.LightningDataModule):
     def setup(self, stage: Optional[str] = None) -> None:
         cache = Path(self.cfg["data"]["cache_dir"])
 
-        features  = np.load(cache / "features.npy")      # [T, N, V]
-        coords    = np.load(cache / "coords.npy")         # [N, 2]
+        features  = np.load(cache / "features.npy")     
+        coords    = np.load(cache / "coords.npy")        
         times_raw = pd.read_csv(cache / "times.csv", header=0).iloc[:, 0]
         times     = pd.DatetimeIndex(pd.to_datetime(times_raw))
 
@@ -226,7 +175,6 @@ class WeatherDataModule(L.LightningDataModule):
         val_times   = times[train_end:val_end]
         test_times  = times[val_end:]
 
-        # ── Normalizer (fit only on train) ──
         if self.cfg["data"]["normalize"]:
             self.normalizer = Normalizer(self.cfg["data"]["norm_method"])
             self.normalizer.fit(train_feat)
@@ -235,7 +183,6 @@ class WeatherDataModule(L.LightningDataModule):
         else:
             self.normalizer = None
 
-        # ── Static graph ──
         from utils.graph_utils import build_static_graph
         static_graph = build_static_graph(
             coords      = coords,
