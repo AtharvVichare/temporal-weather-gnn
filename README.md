@@ -9,6 +9,33 @@ A **Dynamic Spatio-Temporal Graph Neural Network** for multi-step weather foreca
 - **Autoregressive rollout** – GRU-based multi-step forecasting
 - **Full metric suite** – RMSE, MAE, Bias, ACC, Skill Scores vs. persistence & climatology
 
+
+
+## Key Design Decisions
+
+### Ripple Propagation
+Traditional GNNs apply message-passing uniformly across all N nodes at every layer.
+Ripple Propagation instead:
+1. Scores node importance from the hidden state.
+2. Selects epicentre nodes above a threshold.
+3. Expands a localized "active front" via BFS for `radius` hops.
+4. Runs a full GAT layer **only on the active front**.
+
+On large graphs (N ~ 10k+), this reduces per-layer cost from O(N) to O(|front|),
+while concentrating computation on nodes undergoing rapid change (storms, fronts).
+
+### Static + Dynamic Fusion
+- **Static graph** encodes geography: stable k-NN connectivity ensures global coverage.
+- **Dynamic graph** captures evolving atmospheric correlations: wind patterns, pressure systems.
+- **Gated fusion** (default) lets the model learn how much to trust each graph per time step.
+
+### Autoregressive Rollout
+Multi-step predictions are generated autoregressively:
+- Each step re-builds the dynamic graph from the updated hidden state.
+- A GRU cell updates the node hidden state using the previous prediction.
+- A light re-fusion + ripple pass incorporates spatial context.
+
+
 ---
 
 ### 1. Install dependencies
@@ -79,29 +106,6 @@ python train.py --config configs/default.yaml data.dataset=era5
 ```
 
 
-## Key Design Decisions
-
-### Ripple Propagation
-Traditional GNNs apply message-passing uniformly across all N nodes at every layer.
-Ripple Propagation instead:
-1. Scores node importance from the hidden state.
-2. Selects epicentre nodes above a threshold.
-3. Expands a localized "active front" via BFS for `radius` hops.
-4. Runs a full GAT layer **only on the active front**.
-
-On large graphs (N ~ 10k+), this reduces per-layer cost from O(N) to O(|front|),
-while concentrating computation on nodes undergoing rapid change (storms, fronts).
-
-### Static + Dynamic Fusion
-- **Static graph** encodes geography: stable k-NN connectivity ensures global coverage.
-- **Dynamic graph** captures evolving atmospheric correlations: wind patterns, pressure systems.
-- **Gated fusion** (default) lets the model learn how much to trust each graph per time step.
-
-### Autoregressive Rollout
-Multi-step predictions are generated autoregressively:
-- Each step re-builds the dynamic graph from the updated hidden state.
-- A GRU cell updates the node hidden state using the previous prediction.
-- A light re-fusion + ripple pass incorporates spatial context.
 
 ---
 
