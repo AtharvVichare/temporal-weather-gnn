@@ -1,31 +1,8 @@
-"""
-utils/metrics.py
-================
-All weather forecasting metrics.
-
-Functions
----------
-  rmse            : Root Mean Squared Error
-  mae             : Mean Absolute Error
-  bias            : Mean Error (signed)
-  acc             : Anomaly Correlation Coefficient
-  skill_score     : Skill Score vs a baseline (e.g., persistence)
-  compute_all     : Full metric table [n_vars, n_lead_times]
-  persistence_forecast : Simple t+0 → t+k baseline
-  climatology_forecast : Rolling mean baseline
-
-All inputs are numpy arrays with shape [T, N, V] (time, nodes, variables).
-"""
-
 from __future__ import annotations
-
 import numpy as np
 from typing import Sequence
 
 
-# ─────────────────────────────────────────────────────────────
-#  Scalar metrics (operate on arbitrary arrays)
-# ─────────────────────────────────────────────────────────────
 
 def rmse(pred: np.ndarray, target: np.ndarray) -> float:
     return float(np.sqrt(np.mean((pred - target) ** 2)))
@@ -36,7 +13,6 @@ def mae(pred: np.ndarray, target: np.ndarray) -> float:
 
 
 def bias(pred: np.ndarray, target: np.ndarray) -> float:
-    """Signed mean error (positive = over-prediction)."""
     return float(np.mean(pred - target))
 
 
@@ -45,13 +21,7 @@ def acc(
     target: np.ndarray,
     clim:   np.ndarray,
 ) -> float:
-    """
-    Anomaly Correlation Coefficient.
-
-    ACC = Σ (pred_anom * target_anom) / sqrt(Σ pred_anom² * Σ target_anom²)
-
-    pred, target, clim : same shape.  clim is the climatological mean.
-    """
+  
     p_anom = pred   - clim
     t_anom = target - clim
     num    = np.sum(p_anom * t_anom)
@@ -65,13 +35,7 @@ def skill_score(
     baseline: np.ndarray,
     metric:   str = "mse",
 ) -> float:
-    """
-    Skill score vs a baseline.
-
-    SS = 1 - score_model / score_baseline
-
-    metric : "mse" | "mae"
-    """
+    
     if metric == "mse":
         s_model    = np.mean((pred     - target) ** 2)
         s_baseline = np.mean((baseline - target) ** 2)
@@ -83,55 +47,37 @@ def skill_score(
     return float(1.0 - s_model / (s_baseline + 1e-10))
 
 
-# ─────────────────────────────────────────────────────────────
-#  Baseline forecasts
-# ─────────────────────────────────────────────────────────────
-
 def persistence_forecast(
-    x: np.ndarray,   # [T_in, N, V]  – the input window
+    x: np.ndarray,   
     n_steps: int,
-) -> np.ndarray:     # [n_steps, N, V]
+) -> np.ndarray:  
     """Repeat the last observed frame for all forecast steps."""
-    last = x[-1:, :, :]                          # [1, N, V]
+    last = x[-1:, :, :]                       
     return np.repeat(last, n_steps, axis=0)
 
 
 def climatology_forecast(
-    history: np.ndarray,  # [T_history, N, V]
+    history: np.ndarray,
     n_steps: int,
-    window:  int = 720,   # use last `window` steps to estimate clim
-) -> np.ndarray:          # [n_steps, N, V]
-    """Rolling-window mean as the climatological baseline."""
-    clim = history[-window:].mean(axis=0, keepdims=True)  # [1, N, V]
+    window:  int = 720, 
+) -> np.ndarray:        
+    clim = history[-window:].mean(axis=0, keepdims=True)  
     return np.repeat(clim, n_steps, axis=0)
 
 
-# ─────────────────────────────────────────────────────────────
-#  Full metric table
-# ─────────────────────────────────────────────────────────────
-
 def compute_all_metrics(
-    preds:       np.ndarray,            # [T_test, T_out, N, V]
-    targets:     np.ndarray,            # [T_test, T_out, N, V]
-    persistence: np.ndarray,            # [T_test, T_out, N, V]
-    climatology: np.ndarray,            # [T_test, T_out, N, V]
+    preds:       np.ndarray,           
+    targets:     np.ndarray,           
+    persistence: np.ndarray,           
+    climatology: np.ndarray,           
     variables:   Sequence[str],
-    lead_times:  Sequence[int],         # forecast steps (e.g., [1, 3, 6, 12])
+    lead_times:  Sequence[int],        
     dt_hours:    float = 1.0,
 ) -> dict:
-    """
-    Compute RMSE / MAE / Bias / ACC / SkillScore for every
-    (variable, lead_time) combination.
-
-    Returns
-    -------
-    dict with keys like "temperature_lead3h":
-      {rmse, mae, bias, acc, skill_persistence, skill_climatology}
-    """
+  
     n_test, T_out, N, V = preds.shape
     results = {}
 
-    # Climatological mean per node per variable (used for ACC)
     clim_mean = climatology.mean(axis=(0, 1), keepdims=True)
     clim_mean = np.broadcast_to(clim_mean, preds.shape)
 
@@ -139,7 +85,7 @@ def compute_all_metrics(
         for li, lt in enumerate(lead_times):
             if lt - 1 >= T_out:
                 continue
-            step = lt - 1      # 0-indexed step
+            step = lt - 1      
 
             p  = preds      [:, step, :, vi].ravel()
             t  = targets    [:, step, :, vi].ravel()
@@ -164,11 +110,6 @@ def compute_all_metrics(
 
 
 def format_metrics_table(results: dict, variables: Sequence[str]) -> str:
-    """
-    Render a pretty ASCII table of all metrics.
-
-    Returns a string (can be printed or saved to file).
-    """
     try:
         from tabulate import tabulate
         have_tabulate = True
