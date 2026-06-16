@@ -6,10 +6,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.data import Data, Batch
 
-from models.components.ripple_prop       import RipplePropagator
-from models.components.graph_fusion      import GraphFusion, SingleBranchWrapper, GraphBranch
+from models.components.ripple_prop import RipplePropagator
+from models.components.graph_fusion import GraphFusion, SingleBranchWrapper, GraphBranch
 from models.components.temporal_encoding import make_temporal_encoder, CalendarEncoding
-from utils.graph_utils                   import DynamicGraphBuilder
+from utils.graph_utils import DynamicGraphBuilder
 
 
 class TemporalEncoder(nn.Module):
