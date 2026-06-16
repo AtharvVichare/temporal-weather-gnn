@@ -1,115 +1,90 @@
-# ─────────────────────────────────────────────────────────
-#  Temporal Weather GNN  –  Default Configuration
-# ─────────────────────────────────────────────────────────
 
 experiment:
   name: "temporal_weather_gnn"
   seed: 42
-  debug: false          # limits dataset size for fast iteration
-
-# ── Data ──────────────────────────────────────────────────
+  debug: false         
+  
 data:
-  dataset: "synthetic"  # "synthetic" | "noaa" | "era5"
+  dataset: "synthetic" 
   data_dir: "data/raw"
   cache_dir: "data/processed"
   graph_dir: "graphs"
 
-  # Variables to use (subset of available)
   variables: ["temperature", "u_wind", "v_wind", "pressure", "humidity"]
-  n_stations: 100        # number of stations / grid points
-  history_len: 12        # input time steps (e.g., 12 h)
-  forecast_len: 6        # output steps to predict
-  dt_hours: 1            # time resolution in hours
+  n_stations: 100        
+  history_len: 12        
+  forecast_len: 6        
+  dt_hours: 1          
 
-  # Train / val / test split (fractions)
   train_frac: 0.70
   val_frac:   0.15
   test_frac:  0.15
 
-  # Normalization
   normalize: true
-  norm_method: "z-score"  # "z-score" | "minmax"
+  norm_method: "z-score" 
 
-  # DataLoader
   batch_size: 8
   num_workers: 4
   pin_memory: true
 
-# ── Graph Construction ─────────────────────────────────────
 graph:
-  # Static graph (k-NN geographic)
-  static_k: 8                # k nearest neighbours
-  static_max_dist_km: 500    # max edge distance
+  static_k: 8             
+  static_max_dist_km: 500    
 
-  # Dynamic graph
-  dynamic_method: "learned"  # "learned" | "correlation" | "wind_direction"
-  dynamic_top_k: 6           # top-k edges to retain (sparse)
-  dynamic_update_freq: 1     # update every N time steps (1 = every step)
+  dynamic_method: "learned"  
+  dynamic_top_k: 6          
+  dynamic_update_freq: 1     
 
-  # Ripple propagation
-  ripple_radius: 3           # propagation hops per ripple step
-  ripple_threshold: 0.1      # importance threshold to trigger a ripple
-  ripple_steps: 4            # number of ripple rounds per forward pass
-
-# ── Model ─────────────────────────────────────────────────
+  ripple_radius: 3
+  ripple_threshold: 0.1    
+  ripple_steps: 4            
+  
 model:
-  variant: "fusion"   # "static" | "dynamic" | "fusion"
+  variant: "fusion"   
 
-  # Dimensions
-  node_feat_dim: 5    # = len(variables)
+  node_feat_dim: 5   
   hidden_dim: 128
   edge_feat_dim: 16
-  n_heads: 4          # attention heads
+  n_heads: 4       
 
-  # Encoder
   encoder_layers: 3
   encoder_dropout: 0.1
 
-  # Temporal encoding
-  temporal_encoding: "sinusoidal"   # "sinusoidal" | "learned" | "relative"
-  max_seq_len: 168                  # max sequence length in time steps (1 week at 1h)
+  temporal_encoding: "sinusoidal"  
+  max_seq_len: 168                
 
-  # Processor (ripple GNN layers)
   processor_layers: 6
 
-  # Decoder
   decoder_layers: 2
 
-  # Fusion
-  fusion_method: "gated"   # "gated" | "attention" | "residual"
+  fusion_method: "gated"   
 
-  # Autoregressive rollout
   autoregressive: true
 
-# ── Training ──────────────────────────────────────────────
 training:
   epochs: 50
   lr: 3.0e-4
   weight_decay: 1.0e-5
-  scheduler: "cosine"       # "cosine" | "step" | "none"
+  scheduler: "cosine"       
   warmup_epochs: 5
   gradient_clip: 1.0
 
-  # Loss
-  loss: "mse"               # "mse" | "mae" | "huber"
-  physics_loss_weight: 0.0  # set > 0 to enable physics-informed terms
-  rollout_loss_weight: 1.0  # weight for multi-step losses
+  loss: "mse"               
+  physics_loss_weight: 0.0  
+  rollout_loss_weight: 1.0  
 
-  # Checkpointing
   ckpt_dir: "checkpoints"
   save_top_k: 3
   monitor_metric: "val/rmse_temperature"
 
-# ── Logging ───────────────────────────────────────────────
 logging:
-  backend: "tensorboard"   # "wandb" | "tensorboard"
+  backend: "tensorboard"   
   log_every_n_steps: 10
   wandb_project: "temporal-weather-gnn"
-  wandb_entity: null       # set your WandB entity
+  wandb_entity: null      
 
-# ── Evaluation ────────────────────────────────────────────
 evaluation:
-  lead_times: [1, 3, 6, 12, 24]   # hours ahead to evaluate
+  lead_times: [1, 3, 6, 12, 24]   
   metrics: ["rmse", "mae", "bias", "acc", "skill_persistence"]
-  climatology_window: 30           # days for climatology baseline
+  climatology_window: 30           
   output_dir: "results"
