@@ -1,14 +1,3 @@
-"""
-utils/helpers.py
-================
-Miscellaneous utilities:
-  - load_config     : loads + merges YAML configs
-  - set_seed        : reproducibility
-  - get_logger      : returns a Python logger
-  - count_parameters: model parameter count
-  - Timer           : context manager for timing code blocks
-"""
-
 from __future__ import annotations
 
 import logging
@@ -24,12 +13,7 @@ import torch
 import yaml
 
 
-# ─────────────────────────────────────────────────────────────
-#  Config
-# ─────────────────────────────────────────────────────────────
-
 def load_config(path: str, overrides: dict | None = None) -> dict:
-    """Load a YAML config file and optionally apply overrides (flat key-value)."""
     with open(path, "r") as f:
         cfg = yaml.safe_load(f)
 
@@ -50,23 +34,13 @@ def save_config(cfg: dict, path: str) -> None:
         yaml.dump(cfg, f, default_flow_style=False)
 
 
-# ─────────────────────────────────────────────────────────────
-#  Reproducibility
-# ─────────────────────────────────────────────────────────────
 
 def set_seed(seed: int = 42) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    # For full reproducibility (may slow down training):
-    # torch.backends.cudnn.deterministic = True
-    # torch.backends.cudnn.benchmark     = False
 
-
-# ─────────────────────────────────────────────────────────────
-#  Logging
-# ─────────────────────────────────────────────────────────────
 
 def get_logger(name: str = "weather_gnn", level: int = logging.INFO) -> logging.Logger:
     logger = logging.getLogger(name)
@@ -81,10 +55,6 @@ def get_logger(name: str = "weather_gnn", level: int = logging.INFO) -> logging.
     logger.setLevel(level)
     return logger
 
-
-# ─────────────────────────────────────────────────────────────
-#  Model utilities
-# ─────────────────────────────────────────────────────────────
 
 def count_parameters(model: torch.nn.Module, trainable_only: bool = True) -> int:
     """Count (trainable) parameters in a model."""
@@ -101,19 +71,8 @@ def format_param_count(n: int) -> str:
     return str(n)
 
 
-# ─────────────────────────────────────────────────────────────
-#  Timing
-# ─────────────────────────────────────────────────────────────
-
 @contextmanager
 def Timer(label: str = "") -> Generator[None, None, None]:
-    """
-    Context manager that prints elapsed time.
-
-    Usage:
-        with Timer("Forward pass"):
-            output = model(x)
-    """
     start = time.perf_counter()
     try:
         yield
@@ -123,10 +82,6 @@ def Timer(label: str = "") -> Generator[None, None, None]:
         print(f"{tag}Elapsed: {elapsed:.3f}s")
 
 
-# ─────────────────────────────────────────────────────────────
-#  Scalability benchmarking
-# ─────────────────────────────────────────────────────────────
-
 def benchmark_inference(
     model:       torch.nn.Module,
     graph_seq:   list,
@@ -135,25 +90,17 @@ def benchmark_inference(
     n_runs:      int = 20,
     device:      str = "cpu",
 ) -> dict:
-    """
-    Measure inference speed and memory usage.
 
-    Returns dict with:
-      mean_ms   : mean forward pass time in milliseconds
-      std_ms    : standard deviation
-      peak_mb   : peak GPU memory in MB (0 if CPU)
-    """
     model.eval()
     model.to(device)
     static_ei = static_ei.to(device)
     static_ea = static_ea.to(device)
 
-    # Warm-up
+    
     with torch.no_grad():
         for _ in range(3):
             model.forward(graph_seq, static_ei, static_ea)
 
-    # Benchmark
     times = []
     if device != "cpu" and torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
