@@ -1,18 +1,3 @@
-"""
-data/prepare_data.py
-====================
-Handles three data sources:
-  1. Synthetic  – generated in-memory, no download required.
-  2. NOAA ISD   – downloads station CSVs via NOAA's public S3 bucket.
-  3. ERA5        – downloads via the CDS API (requires a free account).
-
-Usage
------
-  python data/prepare_data.py --source synthetic --n_stations 100
-  python data/prepare_data.py --source noaa     --year 2022
-  python data/prepare_data.py --source era5     --year 2022
-"""
-
 import argparse
 import os
 import warnings
@@ -22,12 +7,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-warnings.filterwarnings("ignore")
-
-
-# ─────────────────────────────────────────────────────────────
-#  Synthetic data generator (always works, no credentials needed)
-# ─────────────────────────────────────────────────────────────
 
 def generate_synthetic_data(
     n_stations: int = 100,
@@ -37,52 +16,33 @@ def generate_synthetic_data(
     seed: int = 42,
     out_dir: str = "data/processed",
 ) -> dict:
-    """
-    Generate realistic synthetic weather data with spatial structure,
-    diurnal cycles, and inter-variable correlations.
-
-    Returns
-    -------
-    dict with keys:
-      "coords"   : np.ndarray  [N, 2]  (lat, lon)
-      "features" : np.ndarray  [T, N, V]
-      "times"    : pd.DatetimeIndex
-      "variables": list[str]
-    """
     if variables is None:
         variables = ["temperature", "u_wind", "v_wind", "pressure", "humidity"]
 
     rng = np.random.default_rng(seed)
-
-    # ── Station locations (random inside a ~Europe-sized box) ──
+  
     lats = rng.uniform(45.0, 65.0, size=n_stations)
     lons = rng.uniform(-5.0, 30.0, size=n_stations)
-    coords = np.stack([lats, lons], axis=-1)   # [N, 2]
-
-    # ── Time axis ──
+    coords = np.stack([lats, lons], axis=-1)   
+  
     times = pd.date_range("2022-01-01", periods=n_timesteps, freq=f"{int(dt_hours)}h")
     hours = np.array(times.hour, dtype=float)
     days  = np.array(times.dayofyear, dtype=float)
 
-    # ── Base climatological signal per station ──
-    # Temperature: latitude-dependent mean + seasonal + diurnal cycle
-    lat_effect = (lats - 55.0) * (-0.5)           # colder further north
-    T_mean = 10.0 + lat_effect[None, :]            # [1, N]
+    lat_effect = (lats - 55.0) * (-0.5)          
+    T_mean = 10.0 + lat_effect[None, :]       
     T_seasonal = 8.0 * np.sin(2 * np.pi * (days[:, None] - 80) / 365)
     T_diurnal  = 3.0 * np.sin(2 * np.pi * (hours[:, None] - 14) / 24)
     T_noise    = rng.normal(0, 0.5, size=(n_timesteps, n_stations))
-    temperature = T_mean + T_seasonal + T_diurnal + T_noise   # [T, N]
-
-    # Wind components: spatially correlated noise + synoptic wave
+    temperature = T_mean + T_seasonal + T_diurnal + T_noise   
+  
     synoptic_u = 5.0 * np.sin(2 * np.pi * days / 365)[:, None]
     u_wind = synoptic_u + rng.normal(0, 2.0, size=(n_timesteps, n_stations))
     v_wind = rng.normal(0, 2.0, size=(n_timesteps, n_stations))
 
-    # Pressure: 1013 hPa mean + slow synoptic variation
     pressure = 1013.0 + 5.0 * np.sin(
         2 * np.pi * days / 7)[:, None] + rng.normal(0, 2.0, size=(n_timesteps, n_stations))
 
-    # Humidity: anti-correlated with temperature to some extent
     humidity = 70.0 - 1.5 * (temperature - 10.0) + rng.normal(0, 5.0, size=(n_timesteps, n_stations))
     humidity = np.clip(humidity, 0, 100)
 
@@ -94,7 +54,7 @@ def generate_synthetic_data(
         "humidity":    humidity,
     }
 
-    features = np.stack([var_map[v] for v in variables], axis=-1)  # [T, N, V]
+    features = np.stack([var_map[v] for v in variables], axis=-1)  
 
     data = {
         "coords":    coords,
@@ -103,7 +63,6 @@ def generate_synthetic_data(
         "variables": variables,
     }
 
-    # ── Save ──
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     np.save(f"{out_dir}/coords.npy",   coords)
     np.save(f"{out_dir}/features.npy", features)
@@ -111,11 +70,6 @@ def generate_synthetic_data(
     pd.DataFrame({"variable": variables}).to_csv(f"{out_dir}/variables.csv", index=False)
     print(f"[Synthetic] Saved {n_stations} stations × {n_timesteps} steps × {len(variables)} vars → {out_dir}")
     return data
-
-
-# ─────────────────────────────────────────────────────────────
-#  NOAA ISD (Integrated Surface Database)
-# ─────────────────────────────────────────────────────────────
 
 def download_noaa_data(year: int = 2022, n_stations: int = 50, out_dir: str = "data/raw/noaa") -> None:
     """
@@ -127,10 +81,8 @@ def download_noaa_data(year: int = 2022, n_stations: int = 50, out_dir: str = "d
     import requests
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
-    # NOAA ISD-Lite base URL
     base_url = f"https://www.ncei.noaa.gov/pub/data/noaa/isd-lite/{year}/"
 
-    # Download station list
     station_list_url = "https://www.ncei.noaa.gov/pub/data/noaa/isd-history.csv"
     print(f"Fetching station list from {station_list_url}...")
     resp = requests.get(station_list_url, timeout=30)
@@ -138,7 +90,6 @@ def download_noaa_data(year: int = 2022, n_stations: int = 50, out_dir: str = "d
 
     from io import StringIO
     stations_df = pd.read_csv(StringIO(resp.text), low_memory=False)
-    # Filter: continental USA, has lat/lon
     mask = (
         (stations_df["CTRY"] == "US") &
         stations_df["LAT"].notna() &
@@ -168,8 +119,7 @@ def download_noaa_data(year: int = 2022, n_stations: int = 50, out_dir: str = "d
     print(f"NOAA download complete → {out_dir}")
 
 
-def preprocess_noaa_data(raw_dir: str = "data/raw/noaa", out_dir: str = "data/processed") -> None:
-    """Parse ISD-Lite files and assemble the feature matrix."""
+def preprocess_noaa_data(raw_dir: str = "data/raw/noaa", out_dir: str = "data/processed"):
     import gzip
 
     cols = ["year", "month", "day", "hour",
@@ -211,10 +161,6 @@ def preprocess_noaa_data(raw_dir: str = "data/raw/noaa", out_dir: str = "data/pr
     combined.to_parquet(f"{out_dir}/noaa_combined.parquet")
     print(f"NOAA preprocessing done → {out_dir}/noaa_combined.parquet")
 
-
-# ─────────────────────────────────────────────────────────────
-#  ERA5 (requires CDS API key: https://cds.climate.copernicus.eu)
-# ─────────────────────────────────────────────────────────────
 
 def download_era5_data(
     year: int = 2022,
@@ -274,11 +220,7 @@ def download_era5_data(
 
 
 def preprocess_era5_data(raw_dir: str = "data/raw/era5", out_dir: str = "data/processed",
-                          n_lat: int = 10, n_lon: int = 10) -> None:
-    """
-    Coarsen ERA5 to a coarse grid and save as numpy arrays.
-    Grid points are treated as 'stations'.
-    """
+                          n_lat: int = 10, n_lon: int = 10):
     import glob
 
     files = sorted(glob.glob(f"{raw_dir}/era5_*.nc"))
@@ -286,8 +228,7 @@ def preprocess_era5_data(raw_dir: str = "data/raw/era5", out_dir: str = "data/pr
         raise FileNotFoundError(f"No ERA5 files found in {raw_dir}")
 
     ds = xr.open_mfdataset(files, combine="by_coords")
-
-    # Subsample to manageable grid
+                            
     lat_idx = np.linspace(0, len(ds.latitude) - 1, n_lat, dtype=int)
     lon_idx = np.linspace(0, len(ds.longitude) - 1, n_lon, dtype=int)
     ds = ds.isel(latitude=lat_idx, longitude=lon_idx)
@@ -322,10 +263,6 @@ def preprocess_era5_data(raw_dir: str = "data/raw/era5", out_dir: str = "data/pr
     pd.DataFrame({"variable": variables}).to_csv(f"{out_dir}/variables.csv", index=False)
     print(f"ERA5 preprocessing done → {out_dir}")
 
-
-# ─────────────────────────────────────────────────────────────
-#  CLI
-# ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Prepare weather data for Temporal GNN")
