@@ -1,23 +1,3 @@
-"""
-evaluate.py
-===========
-Evaluation script for trained Temporal Weather GNN models.
-
-Outputs
--------
-  1. Console: pretty-printed metric table (all variables × lead times).
-  2. results/metrics.json  – full results dict.
-  3. results/metrics_table.txt  – ASCII table.
-  4. results/plots/*.png   – RMSE vs. lead-time curves per variable.
-  5. results/scalability.txt – inference time and memory report.
-
-Usage
------
-  python evaluate.py --checkpoint checkpoints/best.ckpt
-  python evaluate.py --checkpoint checkpoints/best.ckpt --config configs/default.yaml
-  python evaluate.py --checkpoint none   # runs with random weights (sanity check)
-"""
-
 from __future__ import annotations
 import argparse
 import json
@@ -52,11 +32,6 @@ from utils.metrics import (
 
 logger = get_logger("evaluate")
 
-
-# ─────────────────────────────────────────────────────────────
-#  Evaluation loop
-# ─────────────────────────────────────────────────────────────
-
 @torch.no_grad()
 def run_evaluation(
     model_module:   WeatherGNNModule,
@@ -65,11 +40,8 @@ def run_evaluation(
     device:         torch.device,
     out_dir:        str = "results",
 ) -> dict:
-    """
-    Run the model on the test set and collect predictions.
 
-    Returns full metrics dict.
-    """
+  
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     Path(f"{out_dir}/plots").mkdir(exist_ok=True)
 
@@ -95,20 +67,17 @@ def run_evaluation(
 
     logger.info("Running evaluation on test set...")
     for batch_idx, (graph_seqs, targets) in enumerate(test_loader):
-        targets = targets.numpy()           # [B, T_out, N, V]
+        targets = targets.numpy()          
         B = len(graph_seqs)
-
-        # Persistence baseline: last known frame repeated
-        # We grab the last step of the input sequence
         persist_batch = np.stack([
             persistence_forecast(
                 np.stack([g.x.numpy() for g in seq], axis=0)[:, :, :len(variables)],
                 n_steps=forecast_len,
             )
             for seq in graph_seqs
-        ])  # [B, T_out, N, V]
+        ]) 
 
-        # Climatology baseline (use target as proxy for rolling mean)
+      
         clim_batch = np.stack([
             climatology_forecast(
                 targets[b],
@@ -117,15 +86,13 @@ def run_evaluation(
             for b in range(B)
         ])
 
-        # Model forward
         t0 = time.perf_counter()
         preds, _ = model_module.model.forward_batch(
             [seq for seq in graph_seqs], static_ei, static_ea
         )
         inference_times.append((time.perf_counter() - t0) * 1000)
 
-        preds_np = preds.cpu().numpy()      # [B, T_out, N, V]
-
+        preds_np = preds.cpu().numpy()     
         all_preds.append(preds_np)
         all_targets.append(targets)
         all_persist.append(persist_batch)
@@ -134,14 +101,13 @@ def run_evaluation(
         if batch_idx % 20 == 0:
             logger.info(f"  Batch {batch_idx}/{len(test_loader)}")
 
-    all_preds   = np.concatenate(all_preds,   axis=0)   # [T_test, T_out, N, V]
+    all_preds   = np.concatenate(all_preds,   axis=0) 
     all_targets = np.concatenate(all_targets, axis=0)
     all_persist = np.concatenate(all_persist, axis=0)
     all_clim    = np.concatenate(all_clim,    axis=0)
 
     logger.info(f"Test set size: {all_preds.shape}")
 
-    # ── Compute metrics ──
     lead_times = cfg["evaluation"].get("lead_times", list(range(1, forecast_len + 1)))
     lead_times = [lt for lt in lead_times if lt <= forecast_len]
 
@@ -155,7 +121,6 @@ def run_evaluation(
         dt_hours    = dt_hours,
     )
 
-    # ── Scalability metrics ──
     mean_inf_ms = float(np.mean(inference_times))
     std_inf_ms  = float(np.std(inference_times))
     n_params    = count_parameters(model_module.model)
@@ -170,7 +135,6 @@ def run_evaluation(
     }
     results["_scalability"] = scalability
 
-    # ── Print table ──
     table_str = format_metrics_table(
         {k: v for k, v in results.items() if not k.startswith("_")},
         variables
@@ -184,7 +148,6 @@ def run_evaluation(
     print(f"  Model parameters: {format_param_count(n_params)}")
     print("=" * 70 + "\n")
 
-    # ── Save ──
     table_path = f"{out_dir}/metrics_table.txt"
     with open(table_path, "w") as f:
         f.write(table_str)
@@ -201,7 +164,6 @@ def run_evaluation(
             f.write(f"{k}: {v}\n")
     logger.info(f"Scalability report → {scalability_path}")
 
-    # ── Plots ──
     _plot_rmse_curves(results, variables, lead_times, dt_hours, out_dir)
     _plot_skill_heatmap(results, variables, lead_times, dt_hours, out_dir)
     _plot_sample_predictions(all_preds, all_targets, variables, dt_hours, out_dir)
@@ -209,12 +171,8 @@ def run_evaluation(
     return results
 
 
-# ─────────────────────────────────────────────────────────────
-#  Plotting helpers
-# ─────────────────────────────────────────────────────────────
 
 def _plot_rmse_curves(results: dict, variables, lead_times, dt_hours, out_dir) -> None:
-    """RMSE vs. lead time per variable."""
     fig, axes = plt.subplots(1, len(variables), figsize=(4 * len(variables), 4), squeeze=False)
     fig.suptitle("RMSE vs. Lead Time", fontsize=14, fontweight="bold")
 
@@ -232,7 +190,6 @@ def _plot_rmse_curves(results: dict, variables, lead_times, dt_hours, out_dir) -
             m = results[key]
             hours.append(int(lt * dt_hours))
             rmse_model.append(m["rmse"])
-            # Reconstruct baseline RMSE from skill scores
             ss_p = m["skill_persistence"]
             ss_c = m["skill_climatology"]
             rmse_persist.append(m["rmse"] / max(1 - ss_p, 1e-6))
@@ -255,7 +212,6 @@ def _plot_rmse_curves(results: dict, variables, lead_times, dt_hours, out_dir) -
 
 
 def _plot_skill_heatmap(results: dict, variables, lead_times, dt_hours, out_dir) -> None:
-    """Skill score heatmap: variables × lead times."""
     skill_mat = np.zeros((len(variables), len(lead_times)))
 
     for vi, var in enumerate(variables):
@@ -283,16 +239,14 @@ def _plot_skill_heatmap(results: dict, variables, lead_times, dt_hours, out_dir)
 
 
 def _plot_sample_predictions(preds, targets, variables, dt_hours, out_dir) -> None:
-    """Plot predicted vs true time series for a sample node and variable."""
     T_test, T_out, N, V = preds.shape
-    sample_node = N // 2     # middle node
+    sample_node = N // 2     
 
     fig, axes = plt.subplots(V, 1, figsize=(12, 3 * V), squeeze=False)
     fig.suptitle(f"Sample Predictions — Node {sample_node}", fontsize=13)
 
     for vi, var in enumerate(variables):
         ax = axes[vi][0]
-        # Show first 50 test windows, lead-1 prediction
         n_show = min(50, T_test)
         t_ax   = np.arange(n_show)
 
@@ -310,9 +264,6 @@ def _plot_sample_predictions(preds, targets, variables, dt_hours, out_dir) -> No
     logger.info(f"Sample predictions saved → {path}")
 
 
-# ─────────────────────────────────────────────────────────────
-#  CLI
-# ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate Temporal Weather GNN")
@@ -327,7 +278,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Device: {device}")
 
-    # ── DataModule ──
+    
     dm = WeatherDataModule(cfg)
     dm.prepare_data()
     dm.setup("test")
@@ -336,7 +287,7 @@ if __name__ == "__main__":
     n_vars         = len(variable_names)
     cfg["model"]["node_feat_dim"] = n_vars
 
-    # ── Load model ──
+    
     if args.checkpoint.lower() == "none":
         logger.warning("No checkpoint provided – using randomly-initialised weights.")
         model_module = WeatherGNNModule(cfg, n_vars, variable_names)
@@ -349,6 +300,6 @@ if __name__ == "__main__":
             variable_names = variable_names,
         )
 
-    # ── Evaluate ──
+    
     results = run_evaluation(model_module, dm, cfg, device, out_dir=args.out_dir)
     logger.info("Evaluation complete.")
