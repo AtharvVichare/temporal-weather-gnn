@@ -1,18 +1,3 @@
-"""
-models/components/graph_fusion.py
-==================================
-Fuses information from two graph streams:
-  - Static  stream: fixed geographic k-NN graph
-  - Dynamic stream: learned or computed graph (updated per step)
-
-Three fusion modes
-------------------
-  "gated"     – element-wise gated combination:
-                  h_out = g ⊙ h_static + (1-g) ⊙ h_dynamic   where g = σ(W h_cat)
-  "attention" – multi-head cross-attention between the two representations.
-  "residual"  – simple addition with a learned scalar per dimension.
-"""
-
 from __future__ import annotations
 
 import torch
@@ -21,16 +6,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import GATConv, GCNConv
 
 
-# ─────────────────────────────────────────────────────────────
-#  Single-graph GNN branch
-# ─────────────────────────────────────────────────────────────
-
 class GraphBranch(nn.Module):
-    """
-    A lightweight GNN branch that runs message-passing on a given graph
-    and returns updated node embeddings.
-    """
-
     def __init__(
         self,
         in_dim:    int,
@@ -56,10 +32,10 @@ class GraphBranch(nn.Module):
 
     def forward(
         self,
-        x:          torch.Tensor,    # [N, in_dim]
-        edge_index: torch.Tensor,    # [2, E]
+        x:          torch.Tensor,    
+        edge_index: torch.Tensor,    
         edge_attr:  torch.Tensor | None = None,
-    ) -> torch.Tensor:               # [N, out_dim]
+    ) -> torch.Tensor:              
         h = x
         for layer, norm in zip(self.layers, self.norms):
             h2 = layer(h, edge_index)
@@ -68,23 +44,7 @@ class GraphBranch(nn.Module):
         return h
 
 
-# ─────────────────────────────────────────────────────────────
-#  Fusion module
-# ─────────────────────────────────────────────────────────────
-
 class GraphFusion(nn.Module):
-    """
-    Runs two GNN branches (static + dynamic) and fuses their outputs.
-
-    Parameters
-    ----------
-    in_dim      : input node feature dimension
-    hidden_dim  : branch hidden dimension
-    method      : "gated" | "attention" | "residual"
-    n_heads     : attention heads (used by GAT inside branches)
-    n_layers    : GNN layers per branch
-    dropout     : dropout rate
-    """
 
     def __init__(
         self,
@@ -117,13 +77,11 @@ class GraphFusion(nn.Module):
             self.out_norm = nn.LayerNorm(hidden_dim)
 
         elif method == "residual":
-            # Learnable scalar mixing coefficients
             self.alpha = nn.Parameter(torch.tensor(0.5))
 
         else:
             raise ValueError(f"Unknown fusion method: {method}")
 
-        # Final projection
         self.proj = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -132,48 +90,36 @@ class GraphFusion(nn.Module):
 
     def forward(
         self,
-        x:                torch.Tensor,         # [N, in_dim]
-        static_ei:        torch.Tensor,         # [2, E_s]
-        static_ea:        torch.Tensor | None,  # [E_s, Fe_s]
-        dynamic_ei:       torch.Tensor,         # [2, E_d]
-        dynamic_weights:  torch.Tensor | None = None,  # [E_d]
-    ) -> torch.Tensor:                          # [N, hidden_dim]
+        x:                torch.Tensor,         
+        static_ei:        torch.Tensor,         
+        static_ea:        torch.Tensor | None,  
+        dynamic_ei:       torch.Tensor,         
+        dynamic_weights:  torch.Tensor | None = None, 
+    ) -> torch.Tensor:                         
         """
         Forward pass through both branches then fusion.
         """
-        h_s = self.static_branch(x, static_ei, static_ea)       # [N, H]
-        h_d = self.dynamic_branch(x, dynamic_ei)                 # [N, H]
+        h_s = self.static_branch(x, static_ei, static_ea)       
+        h_d = self.dynamic_branch(x, dynamic_ei)
 
         if self.method == "gated":
-            g = self.gate(torch.cat([h_s, h_d], dim=-1))        # [N, H]
+            g = self.gate(torch.cat([h_s, h_d], dim=-1))
             h_fused = g * h_s + (1.0 - g) * h_d
 
         elif self.method == "attention":
-            # Use h_s as query, h_d as key/value
-            # Treat N as sequence length, batch=1 (per graph)
-            q = h_s.unsqueeze(0)    # [1, N, H]
-            k = h_d.unsqueeze(0)    # [1, N, H]
-            v = h_d.unsqueeze(0)    # [1, N, H]
+            q = h_s.unsqueeze(0)   
+            k = h_d.unsqueeze(0)    
+            v = h_d.unsqueeze(0)   
             attn_out, _ = self.cross_attn(q, k, v)
-            h_fused = self.out_norm(attn_out.squeeze(0) + h_s)  # [N, H]
-
-        else:  # residual
+            h_fused = self.out_norm(attn_out.squeeze(0) + h_s)  
+          
+        else:  
             α = torch.sigmoid(self.alpha)
             h_fused = α * h_s + (1.0 - α) * h_d
 
-        return self.proj(h_fused)                                 # [N, H]
-
-
-# ─────────────────────────────────────────────────────────────
-#  Ablation wrapper: static-only or dynamic-only branch
-# ─────────────────────────────────────────────────────────────
+        return self.proj(h_fused)                                
 
 class SingleBranchWrapper(nn.Module):
-    """
-    Mimics GraphFusion API but runs only one branch.
-    Used for ablation: model.variant = "static" or "dynamic".
-    """
-
     def __init__(self, branch: GraphBranch, use_static: bool):
         super().__init__()
         self.branch     = branch
